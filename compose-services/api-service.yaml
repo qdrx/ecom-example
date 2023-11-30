@@ -1,0 +1,22 @@
+version: '3'
+services:
+  ik.api:
+    image: ghcr.io/qdrx/ecom-example/ecom-example:latest
+    container_name: ecom-example
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - DATABASE_HOST=ecom-database
+      - DATABASE_PORT=5432
+      - DATABASE_USERNAME=postgres
+      - DATABASE_PASSWORD=admin
+      - DATABASE_NAME=ecom-example
+      - SESSION_SECRET=IOJRGEOIJGOER
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - GOOGLE_CLIENT_ID=
+      - GOOGLE_CLIENT_SECRET=
+      - GOOGLE_CALLBACK_URL=http://localhost:3000/api/auth/google/callback
+
