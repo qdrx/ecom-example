@@ -1,29 +1,15 @@
-import { Column, Entity, Index, PrimaryGeneratedColumn } from "typeorm";
+import { Entity, OneToMany, PrimaryGeneratedColumn } from 'typeorm';
+import { CartProduct } from './cart-product.entity';
+import { Exclude } from 'class-transformer';
 
-@Index(['userId', 'purchaseId'])
 @Entity()
 export class Cart {
   @PrimaryGeneratedColumn()
-  purchaseId: number;
+  @Exclude({ toPlainOnly: true })
+  id: number;
 
-  @Column()
-  userId: number;
-
-  @Column()
-  productId: number;
-
-  @Column()
-  name: string;
-
-  @Column('decimal', { precision: 10, scale: 2 })
-  price: number;
-
-  @Column()
-  image: string;
-
-  @Column()
-  count: number;
-
-  @Column('decimal', { precision: 10, scale: 2 })
-  totalPrice: number;
+  @OneToMany(() => CartProduct, (cartProducts) => cartProducts.cart, {
+    nullable: true,
+  })
+  products: CartProduct[];
 }

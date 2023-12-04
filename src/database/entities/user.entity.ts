@@ -5,6 +5,8 @@ import {
   CreateDateColumn,
   Entity,
   Index,
+  JoinColumn,
+  OneToOne,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
@@ -12,6 +14,7 @@ import { UserRoles } from '../../common/enums';
 import { Exclude } from 'class-transformer';
 import { hashUtils } from '../../utils/hashUtils.util';
 import { ApiHideProperty } from '@nestjs/swagger';
+import { Cart } from './cart.entity';
 
 @Index(['googleId', 'email'])
 @Entity()
@@ -50,6 +53,10 @@ export class User {
 
   @UpdateDateColumn()
   updated_at: number;
+
+  @OneToOne(() => Cart, { cascade: true })
+  @JoinColumn()
+  cart: Cart;
 
   @BeforeInsert()
   async hashPassword() {

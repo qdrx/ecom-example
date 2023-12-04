@@ -1,33 +1,52 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  InternalServerErrorException,
+  NotFoundException,
+} from '@nestjs/common';
 import { CreateUserDto, UpdateUserDto } from './dto';
-import { Repository } from 'typeorm';
-import { User } from '../database/entities';
+import { DataSource, Repository } from 'typeorm';
+import { Cart, User } from '../database/entities';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ServiceException } from '../common/exceptions';
 import { hashUtils } from '../utils/hashUtils.util';
 import { CreateGoogleUserDto } from './dto/create-google-user.dto';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
+import { plainToClass } from 'class-transformer';
 
 @Injectable()
 export class UsersService {
   constructor(
-    @InjectRepository(User) private readonly userRepository: Repository<User>,
+      @InjectRepository(User) private readonly userRepository: Repository<User>,
+      private dataSource: DataSource,
   ) {}
 
   async create(createUserDto: CreateUserDto) {
     const existingUser = await this.userRepository.findOne({
       where: [{ email: createUserDto.email }, { phone: createUserDto.phone }],
     });
-    console.log(createUserDto);
     if (existingUser) {
       throw new ServiceException(
-        'User with such email or phone already exists',
-        400,
+          'User with such email or phone already exists',
+          400,
       );
     }
     createUserDto['passwordHash'] = createUserDto.password;
-    const candidate = this.userRepository.create(createUserDto);
-    return await this.userRepository.save(candidate);
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+    // const candidate = this.userRepository.create(createUserDto);
+    try {
+      const candidate = plainToClass(User, createUserDto);
+      candidate.cart = new Cart();
+      await queryRunner.manager.save(candidate);
+      await queryRunner.commitTransaction();
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      throw new InternalServerErrorException();
+    } finally {
+      await queryRunner.release();
+    }
+    return true;
   }
 
   async createGoogleUser(createUserDto: CreateGoogleUserDto) {
@@ -37,8 +56,8 @@ export class UsersService {
     console.log(createUserDto);
     if (existingUser) {
       throw new ServiceException(
-        'User with such email or phone already exists',
-        400,
+          'User with such email or phone already exists',
+          400,
       );
     }
     const passwordHash = await hashUtils.hashData(createUserDto.password);
@@ -59,6 +78,13 @@ export class UsersService {
 
   async findOneByEmail(email: string): Promise<User> {
     return await this.userRepository.findOneBy({ email });
+  }
+
+  async findOneByIdCart(id: number): Promise<User> {
+    return await this.userRepository.findOne({
+      where: { id },
+      relations: ['cart.products.product'],
+    });
   }
 
   async findOneById(id: number): Promise<User> {

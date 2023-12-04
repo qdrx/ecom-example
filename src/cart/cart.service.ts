@@ -1,76 +1,82 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { Cart } from '../database/entities';
 import { ProductService } from '../products/products.service';
 import { AddToCartDto } from './dto/add-to-cart.dto';
 import { UsersService } from '../users/users.service';
-import { ServiceException } from '../common/exceptions';
+import { CartProduct } from '../database/entities/cart-product.entity';
 import { RemoveFromCartDto } from './dto/remove-from-cart.dto';
 
 @Injectable()
 export class CartService {
   constructor(
-    @InjectRepository(Cart)
-    private readonly cartRepository: Repository<Cart>,
-    private readonly productService: ProductService,
-    private readonly userService: UsersService,
+      private dataSource: DataSource,
+      @InjectRepository(Cart)
+      private readonly cartRepository: Repository<Cart>,
+      @InjectRepository(CartProduct)
+      private readonly cartProductRepository: Repository<CartProduct>,
+      private readonly productService: ProductService,
+      private readonly userService: UsersService,
   ) {}
 
   async add(userId: number, dto: AddToCartDto) {
-    const existsCart = await this.cartRepository.findOne({
-      where: { userId: userId, productId: dto.productId },
-    });
-    if (existsCart) {
-      throw new ServiceException('Product is already in cart', 400);
+    const user = await this.userService.findOneByIdCart(userId);
+    if (!user) throw new NotFoundException();
+    const cart = await this.findCartWithRelations(user.cart.id);
+    const productExistsInCart = cart.products.filter(
+        (p) => p.product.id === dto.productId,
+    );
+    if (productExistsInCart.length > 0) {
+      productExistsInCart[0].quantity += dto.qty;
+      await this.cartProductRepository.save(productExistsInCart[0]);
+      return await this.findCartWithRelations(user.cart.id);
     }
-    const cart = this.cartRepository.create();
-    const user = await this.userService.findOneById(userId);
     const product = await this.productService.getProductById(dto.productId);
-    if (!product) {
-      throw new ServiceException(
-        `Product with id ${dto.productId} does not exist`,
-        400,
-      );
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+    try {
+      const cartProduct = this.cartProductRepository.create({
+        cart: cart[0],
+        product: product,
+        quantity: dto.qty,
+      });
+      const cartProductSaved = await queryRunner.manager.save(cartProduct);
+      cart.products.push(cartProductSaved);
+      await queryRunner.manager.save(cart);
+
+      await queryRunner.commitTransaction();
+    } catch (e) {
+      await queryRunner.rollbackTransaction();
+    } finally {
+      await queryRunner.release();
     }
+    return await this.findCartWithRelations(user.cart.id);
+  }
 
-    cart.userId = user.id;
-    cart.productId = product.id;
-    cart.name = product.name;
-    cart.price = product.price;
-    cart.count = dto.qty;
-    cart.image = JSON.parse(product.images)[0];
-    cart.totalPrice = product.price * dto.qty;
-
-    return await this.cartRepository.save(cart);
+  async findCartWithRelations(id: number) {
+    return await this.cartRepository.findOne({
+      where: { id },
+      relations: ['products.product'],
+    });
   }
 
   async getCart(userId: number) {
-    return await this.cartRepository.find({ where: { userId } });
-  }
-
-  async updateCount(userId: number, dto: AddToCartDto) {
-    const cart = await this.cartRepository.findOne({
-      where: { userId: userId, productId: dto.productId },
-    });
-    if (!cart) {
-      throw new ServiceException('Cart not found', 404);
-    }
-    await this.cartRepository.update(
-      { userId: userId, productId: dto.productId },
-      { count: dto.qty, totalPrice: dto.qty * cart.price },
-    );
-    return await this.cartRepository.findOne({
-      where: { userId: userId, productId: dto.productId },
-    });
+    const user = await this.userService.findOneByIdCart(userId);
+    return user.cart;
   }
 
   async removeItem(userId: number, dto: RemoveFromCartDto) {
-    const cart = await this.cartRepository.findOne({
-      where: { userId: userId, productId: dto.productId },
-    });
-    if (!cart) {
-      throw new ServiceException('Cart or item not found', 404);
+    const user = await this.userService.findOneByIdCart(userId);
+    console.log(user.cart.products);
+    const productExistsInCart = user.cart.products.filter(
+        (p) => p.product.id === dto.productId,
+    );
+    if (productExistsInCart.length > 0) {
+      await this.cartProductRepository.remove(productExistsInCart[0]);
+      return await this.findCartWithRelations(user.cart.id);
     }
+    throw new NotFoundException('Item not found in cart');
   }
 }
